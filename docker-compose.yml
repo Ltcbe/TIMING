@@ -19,8 +19,7 @@ services:
       - "4000:4000"
 
   frontend:
-    build:
-      context: ./frontend
+    build: ./frontend
     ports:
       - "3001:80"
     depends_on:
