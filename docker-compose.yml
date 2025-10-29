@@ -10,21 +10,25 @@ services:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
-
+      
   backend:
     container_name: backend
-    build: ./backend
-    depends_on:
-      - db
+    build:
+      context: ./backend
     ports:
       - "4000:4000"
-
+    networks:
+      - app-network
+      
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
     ports:
       - "3001:80"
     depends_on:
       - backend
+    networks:
+      - app-network
       
 volumes:
   postgres_data:
