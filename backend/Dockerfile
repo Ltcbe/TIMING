@@ -5,7 +5,7 @@ WORKDIR /app
 COPY . .
 
 # Installer les dépendances
-RUN npm install -g npm@11.6.2
+RUN npm install 
 
 # Étape 2 : runtime
 FROM node:18-alpine
