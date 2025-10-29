@@ -1,40 +1,26 @@
+import React from 'react';
 
-import React from "react";
-
-const FilterBar = ({ date, setDate, departure, setDeparture, arrival, setArrival }) => {
+export default function FilterBar({ date, setDate, stations, departure, setDeparture, arrival, setArrival }) {
   return (
-    <div className="bg-white p-4 rounded-lg shadow mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div className="grid md:grid-cols-3 gap-4 my-4 items-end">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">📅 Date</label>
-        <input
-          type="date"
-          className="w-full border border-gray-300 rounded px-3 py-2"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
+        <label className="block text-sm font-medium text-gray-700">📅 Date</label>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full mt-1 border rounded p-2" />
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">🚉 Gare de départ</label>
-        <input
-          type="text"
-          className="w-full border border-gray-300 rounded px-3 py-2"
-          placeholder="Toutes les gares"
-          value={departure}
-          onChange={(e) => setDeparture(e.target.value)}
-        />
+        <label className="block text-sm font-medium text-gray-700">🚉 Gare de départ</label>
+        <select value={departure} onChange={e => setDeparture(e.target.value)} className="w-full mt-1 border rounded p-2">
+          <option value="">Toutes les gares</option>
+          {stations.map((s, i) => <option key={i} value={s}>{s}</option>)}
+        </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">🏁 Gare d'arrivée</label>
-        <input
-          type="text"
-          className="w-full border border-gray-300 rounded px-3 py-2"
-          placeholder="Toutes les gares"
-          value={arrival}
-          onChange={(e) => setArrival(e.target.value)}
-        />
+        <label className="block text-sm font-medium text-gray-700">🚉 Gare d'arrivée</label>
+        <select value={arrival} onChange={e => setArrival(e.target.value)} className="w-full mt-1 border rounded p-2">
+          <option value="">Toutes les gares</option>
+          {stations.map((s, i) => <option key={i} value={s}>{s}</option>)}
+        </select>
       </div>
     </div>
   );
-};
-
-export default FilterBar;
+}
