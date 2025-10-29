@@ -16,7 +16,7 @@ services:
     build:
       context: ./backend
     ports:
-      - "4001:4000"
+      - "4000:4000"
     networks:
       - app-network
       
