@@ -1,4 +1,3 @@
-
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
@@ -13,24 +12,28 @@ const pool = new Pool({
   connectionString: 'postgres://sncb_user:secure_password@db:5432/sncb_timing'
 });
 
+// Vérifie que la connexion à la base fonctionne avant de lancer le serveur
+pool.query('SELECT 1')
+  .then(() => {
+    console.log('✅ Connexion à la base de données réussie');
+
+    // Démarrage du serveur Express
+    app.listen(port, () => {
+      console.log(`🚀 API SNCB Timing en ligne sur http://localhost:${port}`);
+    });
+  })
+  .catch(err => {
+    console.error('❌ Erreur de connexion à la base de données :', err);
+    process.exit(1);
+  });
+
+// Route principale
 app.get('/api/trains', async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT 
-        train_id AS "trainNumber",
-        departure_station AS "departureStation",
-        arrival_station AS "arrivalStation",
-        delay AS "delayMinutes",
-        scheduled_time AS "scheduledTime",
-        actual_time AS "actualTime",
-        timestamp
-      FROM train_delays
-      ORDER BY id DESC
-      LIMIT 100
-    `);
+    const result = await pool.query('SELECT * FROM train_delays ORDER BY id DESC LIMIT 100');
     res.json(result.rows);
   } catch (err) {
-    console.error(err);
+    console.error('❌ Erreur sur /api/trains :', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
