@@ -15,14 +15,22 @@ const pool = new Pool({
 
 app.get('/api/trains', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM train_delays ORDER BY id DESC LIMIT 100');
+    const result = await pool.query(`
+      SELECT 
+        train_id AS "trainNumber",
+        departure_station AS "departureStation",
+        arrival_station AS "arrivalStation",
+        delay AS "delayMinutes",
+        scheduled_time AS "scheduledTime",
+        actual_time AS "actualTime",
+        timestamp
+      FROM train_delays
+      ORDER BY id DESC
+      LIMIT 100
+    `);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
-});
-
-app.listen(port, () => {
-  console.log(`API SNCB Timing running on http://localhost:${port}`);
 });
