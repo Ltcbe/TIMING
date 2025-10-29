@@ -12,7 +12,6 @@ services:
       - "5432:5432"
       
   backend:
-    container_name: backend
     build:
       context: ./backend
     ports:
