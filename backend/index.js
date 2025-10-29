@@ -1,6 +1,6 @@
 const express = require('express');
-const { Pool } = require('pg');
 const cors = require('cors');
+const fetch = require('node-fetch'); // Nécessaire pour appeler l'API iRail
 
 const app = express();
 const port = 4000;
@@ -8,41 +8,33 @@ const port = 4000;
 app.use(cors());
 app.use(express.json());
 
-// Connexion à la base de données
-const pool = new Pool({
-  connectionString: 'postgres://sncb_user:secure_password@db:5432/sncb_timing'
-});
-
-pool.connect()
-  .then(() => {
-    console.log('✅ Connexion à la base de données réussie');
-  })
-  .catch((err) => {
-    console.error('❌ Erreur de connexion à la base de données :', err);
-  });
-
-// Redirection des URL avec slash final
-app.use((req, res, next) => {
-  if (req.path.length > 1 && req.path.endsWith('/')) {
-    const query = req.url.slice(req.path.length);
-    res.redirect(301, req.path.slice(0, -1) + query);
-  } else {
-    next();
-  }
-});
-
-// Route API
+// ✅ Endpoint en temps réel depuis iRail
 app.get('/api/trains', async (req, res) => {
   try {
-    const result = await pool.query('SELECT * FROM train_delays ORDER BY id DESC LIMIT 100');
-    res.json(result.rows);
+    const station = req.query.station || 'Bruxelles-Central'; // option pour personnaliser la station
+    const url = `https://api.irail.be/liveboard/?station=${encodeURIComponent(station)}&format=json&fast=true`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Erreur API iRail: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const trains = data.departures.departure.map(train => ({
+      train_id: train.vehicle,
+      departure_station: data.station,
+      arrival_station: train.station,
+      scheduled_time: new Date(train.time * 1000).toISOString(),
+      delay_minutes: train.delay / 60
+    }));
+
+    res.json(trains);
   } catch (err) {
-    console.error('Erreur serveur :', err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    console.error('❌ Erreur lors de la récupération des données iRail:', err);
+    res.status(500).json({ error: 'Erreur lors de la récupération des données en temps réel' });
   }
 });
 
-// Lancement du serveur
 app.listen(port, () => {
   console.log(`🚀 API SNCB Timing en ligne sur http://localhost:${port}`);
 });
