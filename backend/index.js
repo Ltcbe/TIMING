@@ -9,6 +9,7 @@ const port = 4000;
 app.use(cors());
 app.use(express.json());
 
+// Connexion PostgreSQL
 const pool = new Pool({
   user: 'sncb_user',
   host: 'db',
@@ -17,7 +18,12 @@ const pool = new Pool({
   port: 5432,
 });
 
-// ✅ Route pour afficher tous les trains enregistrés
+// 🟢 ROUTE de test pour vérifier que l'API est vivante
+app.get('/', (req, res) => {
+  res.send('✅ Backend API SNCB opérationnel.');
+});
+
+// ✅ Route pour lister tous les trains
 app.get('/api/trains', async (req, res) => {
   try {
     const result = await pool.query(
@@ -25,12 +31,12 @@ app.get('/api/trains', async (req, res) => {
     );
     res.json(result.rows);
   } catch (error) {
-    console.error('Erreur lors de la récupération des trains :', error);
+    console.error('❌ Erreur récupération trains :', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// ✅ Route pour afficher les arrêts d’un train
+// ✅ Route pour les arrêts d’un train
 app.get('/api/trains/:trainId/stops', async (req, res) => {
   const trainId = req.params.trainId;
 
@@ -50,10 +56,14 @@ app.get('/api/trains/:trainId/stops', async (req, res) => {
     const response = await fetch(`https://api.irail.be/vehicle/?id=${trainId}&format=json`);
     const data = await response.json();
 
-    const stopTimes = data.stops?.stop || [];
+    if (!data.stops || !Array.isArray(data.stops.stop)) {
+      return res.status(404).json({ error: 'Aucun arrêt trouvé' });
+    }
 
-    for (const stop of stopTimes) {
-      const delay = parseInt(stop.delay, 10) / 60;
+    for (const stop of data.stops.stop) {
+      const scheduledTime = stop.scheduledDepartureTime || stop.scheduledArrivalTime || stop.time;
+      const actualTime = stop.time || scheduledTime;
+      const delay = isNaN(parseInt(stop.delay)) ? 0 : parseInt(stop.delay) / 60;
 
       await pool.query(
         `INSERT INTO train_delays (train_id, departure_station, arrival_station, scheduled_time, actual_time, delay)
@@ -61,10 +71,10 @@ app.get('/api/trains/:trainId/stops', async (req, res) => {
         [
           trainId,
           stop.station,
-          stop.station, // à ajuster selon logique
-          stop.scheduledDepartureTime || stop.scheduledArrivalTime,
-          stop.time,
-          isNaN(delay) ? 0 : delay,
+          stop.station,
+          scheduledTime,
+          actualTime,
+          delay,
         ]
       );
     }
@@ -76,7 +86,7 @@ app.get('/api/trains/:trainId/stops', async (req, res) => {
 
     res.json(updatedResult.rows);
   } catch (error) {
-    console.error('Erreur lors de la récupération des arrêts :', error);
+    console.error('❌ Erreur récupération des arrêts :', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
