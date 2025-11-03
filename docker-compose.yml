@@ -32,6 +32,15 @@ services:
     networks:
       - app-network
     restart: always
+
+  cronjob:
+    build:
+      context: ./cronjob
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
       
 networks:
   app-network:
