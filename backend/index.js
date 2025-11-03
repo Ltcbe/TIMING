@@ -13,45 +13,88 @@ const pool = new Pool({
   connectionString: 'postgres://sncb_user:secure_password@db:5432/sncb_timing'
 });
 
-// Fonction pour récupérer les arrêts intermédiaires
-async function getIntermediateStops(trainId, date) {
-  try {
-    const response = await fetch(`https://api.irail.be/connections/?format=json&departureTime=now&language=fr&trainId=${trainId}&date=${date}`);
-    const data = await response.json();
-    if (data.connection && data.connection.length > 0) {
-      const stops = data.connection[0].vias?.via || [];
-      return stops.map(stop => ({
-        station: stop.station,
-        arrival: stop.arrival.time,
-        departure: stop.departure.time
-      }));
-    }
-    return [];
-  } catch (error) {
-    console.error(`Erreur récupération arrêts pour train ${trainId}:`, error.message);
-    return [];
+// ✅ Vérifie si les arrêts sont déjà stockés pour ce trajet et encore valides (<30 min)
+async function isStopsCached(trainId, trainTimestamp) {
+  const result = await pool.query(
+    `SELECT MAX(arrival_time) AS latest_arrival
+     FROM train_stops
+     WHERE train_id = $1 AND train_timestamp = $2`,
+    [trainId, trainTimestamp]
+  );
+
+  const latestArrival = result.rows[0].latest_arrival;
+  if (!latestArrival) return false;
+
+  const now = new Date();
+  const diffMinutes = (now - new Date(latestArrival)) / (1000 * 60);
+  return diffMinutes <= 30;
+}
+
+// 💾 Insère les arrêts dans la base
+async function cacheIntermediateStops(trainId, trainTimestamp, stops) {
+  for (let i = 0; i < stops.length; i++) {
+    const stop = stops[i];
+    await pool.query(
+      `INSERT INTO train_stops (train_id, stop_order, station, arrival_time, departure_time, train_timestamp)
+       VALUES ($1, $2, $3, to_timestamp($4), to_timestamp($5), $6)`,
+      [trainId, i + 1, stop.station, stop.arrival, stop.departure, trainTimestamp]
+    );
   }
 }
 
-// Route API
-app.get('/api/trains', async (req, res) => {
+// 🌐 Récupère les arrêts depuis l’API SNCB
+async function fetchAndCacheStops(trainId, trainTimestamp) {
+  const date = trainTimestamp.toISOString().split('T')[0];
+  const url = `https://api.irail.be/vehicle/${trainId}?format=json&lang=fr&date=${date}`;
+
+  const response = await fetch(url);
+  const data = await response.json();
+
+  const stops = (data.stops?.stop || []).map((stop) => ({
+    station: stop.station,
+    arrival: stop.arrival?.time || stop.scheduledArrivalTime,
+    departure: stop.departure?.time || stop.scheduledDepartureTime
+  }));
+
+  await cacheIntermediateStops(trainId, trainTimestamp, stops);
+  return stops;
+}
+
+// 📥 Route API pour obtenir les arrêts d’un train
+app.get('/api/trains/:trainId/stops', async (req, res) => {
+  const { trainId } = req.params;
+
+  const result = await pool.query(
+    'SELECT * FROM train_delays WHERE train_id = $1 ORDER BY timestamp DESC LIMIT 1',
+    [trainId]
+  );
+
+  if (result.rows.length === 0) {
+    return res.status(404).json({ error: 'Train non trouvé en base.' });
+  }
+
+  const train = result.rows[0];
+  const trainTimestamp = new Date(train.timestamp);
+
   try {
-    const result = await pool.query('SELECT * FROM train_delays ORDER BY id DESC LIMIT 10');
-    const trains = result.rows;
+    const cached = await isStopsCached(trainId, trainTimestamp);
 
-    const trainsWithStops = await Promise.all(trains.map(async train => {
-      const date = new Date(train.timestamp).toISOString().split('T')[0];
-      const stops = await getIntermediateStops(train.train_id, date);
-      return {
-        ...train,
-        intermediateStops: stops
-      };
-    }));
-
-    res.json(trainsWithStops);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Erreur serveur' });
+    if (cached) {
+      const cachedStops = await pool.query(
+        `SELECT stop_order, station, arrival_time, departure_time
+         FROM train_stops
+         WHERE train_id = $1 AND train_timestamp = $2
+         ORDER BY stop_order ASC`,
+        [trainId, trainTimestamp]
+      );
+      return res.json({ source: 'db', stops: cachedStops.rows });
+    } else {
+      const liveStops = await fetchAndCacheStops(trainId, trainTimestamp);
+      return res.json({ source: 'api', stops: liveStops });
+    }
+  } catch (error) {
+    console.error('Erreur :', error);
+    return res.status(500).json({ error: 'Erreur interne serveur' });
   }
 });
 
