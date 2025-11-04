@@ -17,7 +17,7 @@ const pool = new Pool({
   port: 5432,
 });
 
-// ✅ Route pour lister tous les trains stockés (distincts)
+// ✅ Route pour afficher tous les trains enregistrés
 app.get('/api/trains', async (req, res) => {
   try {
     const result = await pool.query(
@@ -29,6 +29,7 @@ app.get('/api/trains', async (req, res) => {
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
 
 // ✅ Route pour obtenir les arrêts d’un train spécifique
 app.get('/api/trains/:trainId/stops', async (req, res) => {
