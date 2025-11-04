@@ -17,18 +17,22 @@ const pool = new Pool({
   port: 5432,
 });
 
-// ✅ Route pour afficher tous les trains enregistrés
+// ✅ Route pour afficher tous les trajets (avec détails)
 app.get('/api/trains', async (req, res) => {
   try {
-    const result = await pool.query(
-      `SELECT DISTINCT train_id FROM train_delays ORDER BY train_id`
-    );
+    const result = await pool.query(`
+      SELECT DISTINCT ON (train_id) train_id, departure_station, arrival_station
+      FROM train_delays
+      ORDER BY train_id, scheduled_time DESC
+    `);
+
     res.json(result.rows);
   } catch (error) {
     console.error('Erreur lors de la récupération des trains :', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
+
 
 
 // ✅ Route pour obtenir les arrêts d’un train spécifique
