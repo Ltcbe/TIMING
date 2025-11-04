@@ -1,4 +1,3 @@
-
 import React from "react";
 
 const TrainsTable = ({ trains }) => {
@@ -14,9 +13,19 @@ const TrainsTable = ({ trains }) => {
     return "text-red-700 bg-red-100";
   };
 
+  // ✅ Fonction utilitaire sécurisée pour afficher une heure
+  const formatTime = (timeValue) => {
+    if (!timeValue) return "—"; // si null/undefined/vide
+    const d = new Date(timeValue);
+    if (isNaN(d.getTime())) return "—"; // si date invalide
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
   return (
     <div className="bg-white p-4 rounded-lg shadow">
-      <h2 className="text-lg font-semibold text-gray-800 mb-4">📋 Détail des trajets ({trains.length})</h2>
+      <h2 className="text-lg font-semibold text-gray-800 mb-4">
+        📋 Détail des trajets ({trains.length})
+      </h2>
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm text-gray-700">
           <thead>
@@ -36,11 +45,19 @@ const TrainsTable = ({ trains }) => {
                 <td className="px-4 py-2">{train.train_id}</td>
                 <td className="px-4 py-2">{train.departure_station}</td>
                 <td className="px-4 py-2">{train.arrival_station}</td>
-                <td className="px-4 py-2">{new Date(train.scheduled_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                <td className="px-4 py-2">{new Date(train.actual_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
-                <td className="px-4 py-2">{train.delay} min</td>
+
+                {/* ✅ Sécurisation de l’affichage des dates */}
+                <td className="px-4 py-2">{formatTime(train.scheduled_time)}</td>
+                <td className="px-4 py-2">{formatTime(train.actual_time)}</td>
+
+                <td className="px-4 py-2">{train.delay ?? "—"} min</td>
                 <td className="px-4 py-2">
-                  <span className={"px-2 py-1 rounded-full text-xs font-medium " + getBadgeClass(train.delay)}>
+                  <span
+                    className={
+                      "px-2 py-1 rounded-full text-xs font-medium " +
+                      getBadgeClass(train.delay)
+                    }
+                  >
                     {getStatus(train.delay)}
                   </span>
                 </td>
