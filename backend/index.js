@@ -1,36 +1,48 @@
-const express = require('express');
-const cors = require('cors');
-const { Pool } = require('pg');
-const fetch = require('node-fetch');
+/**
+ * =============================================
+ * 🎯 TIMING — BACKEND EXPRESS (corrigé et complet)
+ * =============================================
+ */
+
+import express from 'express';
+import cors from 'cors';
+import axios from 'axios';
+import dotenv from 'dotenv';
+import { pool } from './db.js';
+
+dotenv.config();
 
 const app = express();
-const port = 4000;
+const PORT = process.env.PORT || 4000;
 
 app.use(cors());
 app.use(express.json());
 
-// Connexion PostgreSQL
-const pool = new Pool({
-  user: 'sncb_user',
-  host: 'db',
-  database: 'sncb_timing',
-  password: 'secure_password',
-  port: 5432,
-});
+/**
+ * =============================================
+ * 🧭 ROUTES PRINCIPALES
+ * =============================================
+ */
 
-console.log("✅ Connexion à la base PostgreSQL initialisée");
-
-// =============================================================
-// 🔹 Route 1 : Liste des trains connus
-// =============================================================
+/**
+ * @route GET /api/trains
+ * Récupère la liste des trains avec leurs informations les plus récentes.
+ * -> Correction : on renvoie aussi scheduled_time, actual_time et delay.
+ */
 app.get('/api/trains', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT DISTINCT ON (train_id)
-        train_id, departure_station, arrival_station
+        train_id,
+        departure_station,
+        arrival_station,
+        scheduled_time,
+        actual_time,
+        delay
       FROM train_delays
       ORDER BY train_id, scheduled_time DESC
     `);
+
     res.json(result.rows);
   } catch (error) {
     console.error('❌ Erreur lors de la récupération des trains :', error);
@@ -38,143 +50,90 @@ app.get('/api/trains', async (req, res) => {
   }
 });
 
-// =============================================================
-// 🔹 Route 2 : Détails d’un train (arrêts)
-// =============================================================
-app.get('/api/trains/:trainId/stops', async (req, res) => {
-  const trainId = req.params.trainId;
-
+/**
+ * @route GET /api/trains/:id/stops
+ * Récupère tous les arrêts d’un train spécifique.
+ */
+app.get('/api/trains/:id/stops', async (req, res) => {
   try {
-    const now = new Date();
-    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60000);
-
-    // Vérifier si on a déjà des données récentes
-    const dbResult = await pool.query(
-      `SELECT * FROM train_delays WHERE train_id = $1 AND actual_time >= $2 ORDER BY scheduled_time`,
-      [trainId, thirtyMinutesAgo]
+    const { id } = req.params;
+    const result = await pool.query(
+      'SELECT * FROM train_delays WHERE train_id = $1 ORDER BY scheduled_time ASC',
+      [id]
     );
-
-    if (dbResult.rows.length > 0) {
-      console.log(`📦 Données trouvées en DB pour ${trainId}`);
-      return res.json(dbResult.rows);
-    }
-
-    // Sinon → récupérer depuis iRail
-    console.log(`🌐 Fetch depuis iRail pour ${trainId}`);
-    const response = await fetch(`https://api.irail.be/vehicle/?id=${trainId}&format=json`);
-    const data = await response.json();
-    const stops = data.stops?.stop || [];
-
-    for (const stop of stops) {
-      const delay = parseInt(stop.delay, 10) / 60;
-      const scheduledTimestamp = Number(stop.scheduledDepartureTime || stop.scheduledArrivalTime);
-      const actualTimestamp = Number(stop.time);
-
-      // 🧠 Vérification anti-crash
-      if (isNaN(scheduledTimestamp) || isNaN(actualTimestamp)) {
-        console.warn(`⚠️  Horaires invalides ignorés pour ${trainId} →`, stop.station);
-        continue;
-      }
-
-      await pool.query(
-        `INSERT INTO train_delays
-         (train_id, departure_station, arrival_station, scheduled_time, actual_time, delay)
-         VALUES ($1, $2, $3, to_timestamp($4), to_timestamp($5), $6)`,
-        [
-          trainId,
-          stop.station,
-          stop.station, // tu peux remplacer par stop.departure.station si dispo
-          scheduledTimestamp,
-          actualTimestamp,
-          isNaN(delay) ? 0 : delay,
-        ]
-      );
-    }
-
-    // Renvoyer la version mise à jour
-    const updated = await pool.query(
-      `SELECT * FROM train_delays WHERE train_id = $1 AND actual_time >= $2 ORDER BY scheduled_time`,
-      [trainId, thirtyMinutesAgo]
-    );
-
-    res.json(updated.rows);
+    res.json(result.rows);
   } catch (error) {
     console.error('❌ Erreur lors de la récupération des arrêts :', error);
     res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
-// =============================================================
-// 🔹 Route 3 : Collecte automatique des trains d’une gare
-// =============================================================
+/**
+ * @route GET /api/fetch-trains
+ * Récupère les données depuis l’API iRail et les insère dans PostgreSQL.
+ */
 app.get('/api/fetch-trains', async (req, res) => {
   try {
-    const station = 'Bruxelles-Central'; // ✅ configurable
-    console.log(`🚆 Récupération liveboard pour ${station}`);
+    console.log('🚀 Récupération des trains depuis iRail...');
 
-    const liveboardRes = await fetch(
-      `https://api.irail.be/liveboard/?station=${encodeURIComponent(station)}&arrdep=departure&format=json`
-    );
-    const liveboardData = await liveboardRes.json();
+    // Exemple : Bruxelles -> Liège (tu peux adapter dynamiquement)
+    const apiUrl = `${process.env.IRAIL_API}/connections/?from=Bruxelles-Central&to=Liège-Guillemins&format=json&lang=fr`;
 
-    const trains = liveboardData.departures?.departure || [];
-    const now = new Date();
-    const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60000);
+    const { data } = await axios.get(apiUrl);
 
-    for (const train of trains) {
-      const trainId = train.vehicle?.split('.').pop(); // "BE.NMBS.IC1234" → "IC1234"
-      if (!trainId) continue;
-
-      const exists = await pool.query(
-        `SELECT 1 FROM train_delays WHERE train_id = $1 AND actual_time >= $2 LIMIT 1`,
-        [trainId, thirtyMinutesAgo]
-      );
-      if (exists.rowCount > 0) {
-        console.log(`⏩ Train ${trainId} déjà en base`);
-        continue;
-      }
-
-      console.log(`🔄 Fetch iRail pour ${trainId}`);
-      const vehicleRes = await fetch(`https://api.irail.be/vehicle/?id=${trainId}&format=json`);
-      const vehicleData = await vehicleRes.json();
-      const stops = vehicleData.stops?.stop || [];
-
-      for (const stop of stops) {
-        const delay = parseInt(stop.delay, 10) / 60;
-        const scheduledTimestamp = Number(stop.scheduledDepartureTime || stop.scheduledArrivalTime);
-        const actualTimestamp = Number(stop.time);
-
-        if (isNaN(scheduledTimestamp) || isNaN(actualTimestamp)) {
-          console.warn(`⚠️  Données invalides ignorées pour ${trainId} →`, stop.station);
-          continue;
-        }
-
-        await pool.query(
-          `INSERT INTO train_delays
-           (train_id, departure_station, arrival_station, scheduled_time, actual_time, delay)
-           VALUES ($1, $2, $3, to_timestamp($4), to_timestamp($5), $6)`,
-          [
-            trainId,
-            stop.station,
-            stop.station,
-            scheduledTimestamp,
-            actualTimestamp,
-            isNaN(delay) ? 0 : delay,
-          ]
-        );
-      }
+    if (!data.connections || data.connections.length === 0) {
+      console.warn('⚠️ Aucune donnée reçue de iRail');
+      return res.status(204).json({ message: 'Aucune donnée reçue de iRail' });
     }
 
-    res.json({ message: '✅ Données récupérées et stockées avec succès' });
+    let inserted = 0;
+
+    for (const conn of data.connections) {
+      const trainId = conn.departure.vehicle.replace('BE.NMBS.', '');
+      const depStation = conn.departure.station;
+      const arrStation = conn.arrival.station;
+
+      const scheduled = new Date(parseInt(conn.departure.time) * 1000);
+      const actual = conn.departure.leftTime
+        ? new Date(parseInt(conn.departure.leftTime) * 1000)
+        : scheduled;
+      const delay = conn.departure.delay ? conn.departure.delay / 60 : 0; // secondes → minutes
+
+      await pool.query(
+        `
+        INSERT INTO train_delays
+        (train_id, departure_station, arrival_station, scheduled_time, actual_time, delay)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT DO NOTHING;
+      `,
+        [trainId, depStation, arrStation, scheduled, actual, delay]
+      );
+
+      inserted++;
+    }
+
+    console.log(`✅ ${inserted} trajets insérés avec succès.`);
+    res.json({ message: `Trains récupérés (${inserted} insérés)` });
   } catch (error) {
-    console.error('❌ Erreur lors du fetch automatique :', error);
-    res.status(500).json({ error: 'Erreur lors de la collecte automatique' });
+    console.error('❌ Erreur lors de la récupération iRail :', error.message);
+    res.status(500).json({ error: 'Erreur lors de la récupération depuis iRail' });
   }
 });
 
-// =============================================================
-// 🚀 Lancement serveur
-// =============================================================
-app.listen(port, () => {
-  console.log(`🚀 API SNCB Timing en ligne sur http://localhost:${port}`);
+/**
+ * =============================================
+ * 🩺 ROUTE DE TEST
+ * =============================================
+ */
+app.get('/', (req, res) => {
+  res.send('✅ API Timing opérationnelle !');
+});
+
+/**
+ * =============================================
+ * 🚉 DÉMARRAGE DU SERVEUR
+ * =============================================
+ */
+app.listen(PORT, () => {
+  console.log(`🚉 Serveur backend en écoute sur le port ${PORT}`);
 });
