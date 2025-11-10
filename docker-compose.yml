@@ -1,54 +1,91 @@
+version: "3.9"
+
 services:
+  # --------------------
+  # 🗄️ Base de données MariaDB
+  # --------------------
   db:
-    image: postgres:15
+    image: mariadb:11
+    container_name: sncb2-db
     restart: always
     environment:
-      POSTGRES_USER: sncb_user
-      POSTGRES_PASSWORD: secure_password
-      POSTGRES_DB: sncb_timing
+      MARIADB_ROOT_PASSWORD: rootpwd
+      MARIADB_DATABASE: irail
+      MARIADB_USER: irail
+      MARIADB_PASSWORD: irailpwd
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - db_data:/var/lib/mysql
     networks:
-      - app-network
-          
+      - app-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -prootpwd || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 40s
+
+  # --------------------
+  # ⚙️ Backend FastAPI
+  # --------------------
   backend:
-    build:
-      context: ./backend
-    ports:
-      - "4000:4000"
-    networks:
-      - app-network
+    build: ./backend
+    container_name: sncb2-backend
     restart: always
-      
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      MARIADB_HOST: db
+      MARIADB_DATABASE: irail
+      MARIADB_USER: irail
+      MARIADB_PASSWORD: irailpwd
+      LOG_LEVEL: info
+    volumes:
+      - ./backend:/app
+    ports:
+      - "1788:1788"
+    networks:
+      - app-net
+    command: >
+      sh -c "
+        echo '⏳ Attente de la base de données...' &&
+        until mysqladmin ping -h db -u$$MARIADB_USER -p$$MARIADB_PASSWORD --silent; do
+          sleep 2;
+        done &&
+        echo '✅ Base de données prête, démarrage du backend.' &&
+        uvicorn app.main:app --host 0.0.0.0 --port 1788
+      "
+
+  # --------------------
+  # 🌐 Frontend React + Nginx
+  # --------------------
   frontend:
     build:
       context: ./frontend
+      args:
+        - VITE_API_BASE=/api
+    container_name: sncb2-frontend
+    restart: always
+    depends_on:
+      - backend
+    environment:
+      - VITE_API_BASE=/api
     ports:
-      - "3001:80"
-    depends_on:
-      - backend
+      - "8765:80"
     networks:
-      - app-network
-    restart: always
+      - app-net
+      - dokploy-network
+    # Le proxy Nginx redirige /api vers le backend
+    # Voir frontend/nginx.conf pour la config
 
-  cronjob:
-    build:
-      context: ./cronjob
-    depends_on:
-      - backend
-    networks:
-      - app-network
-    restart: always
-
-      
+# --------------------
+# 🌉 Réseaux & volumes
+# --------------------
 networks:
-  app-network:
+  app-net:
     driver: bridge
-      
+  dokploy-network:
+    external: true
+
 volumes:
-  postgres_data:
-
-
-#####
+  db_data:
